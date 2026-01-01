@@ -126,13 +126,12 @@ export default function LoginPage() {
                 </Form>
             </CardContent>
             <CardFooter>
-                <div className="text-sm text-center w-full text-muted-foreground">
+                {/* <div className="text-sm text-center w-full text-muted-foreground">
                     Don&apos;t have an account?{" "}
-                    {/* Note: Register page path has changed to /register which is inside (auth) */}
                     <Button variant="link" className="p-0" onClick={() => router.push("/register")}>
                         Sign up
                     </Button>
-                </div>
+                </div> */}
             </CardFooter>
         </Card>
     )
