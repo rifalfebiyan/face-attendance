@@ -16,6 +16,18 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+    AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+
 // Define Employee Type
 interface Employee {
     id: string
@@ -31,21 +43,6 @@ export default function EmployeesPage() {
     const fetchEmployees = async () => {
         setIsLoading(true)
         try {
-            // We're using the /stats endpoint mostly, but for a full list we might need a direct Supabase call
-            // OR we can add an endpoint /employees to our Flask app.
-            // For now, let's try to fetch all employees via a new endpoint or reusing supabase client if we were using it in frontend.
-            // Since we are proxying to Flask, let's stick to Flask endpoints.
-            // I'll add a temporary mock fetch or we can request the user to add the endpoint.
-            // Wait, for this iteration, let's try to use the direct Supabase client in frontend or add endpoint.
-            // The user didn't ask for a new backend endpoint yet, but "manage employees" implies listing them.
-            // Let's fallback to reusing the stats/history approach or ask backend to provide list.
-
-            // Actually, let's implement a simple direct fetching via our backend structure.
-            // Currently app.py doesn't have /employees list. 
-            // I will implement a client-side fetch assuming we might add the endpoint OR 
-            // I will use the `stats` endpoint if it had the list. It doesn't.
-
-            // Let's assume we will add /employees to app.py shortly.
             const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/employees`, {
                 headers: { "ngrok-skip-browser-warning": "true" }
             })
@@ -53,7 +50,6 @@ export default function EmployeesPage() {
                 const data = await res.json()
                 setEmployees(data.employees || [])
             } else {
-                // Fallback for now if endpoint doesn't exist
                 console.log("Endpoint /employees not found")
             }
         } catch (error) {
@@ -61,6 +57,25 @@ export default function EmployeesPage() {
             toast.error("Gagal memuat data karyawan")
         } finally {
             setIsLoading(false)
+        }
+    }
+
+    const handleDelete = async (id: string) => {
+        try {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/employees/${id}`, {
+                method: "DELETE",
+                headers: { "ngrok-skip-browser-warning": "true" }
+            })
+
+            if (res.ok) {
+                toast.success("Karyawan berhasil dihapus")
+                fetchEmployees() // Refresh list
+            } else {
+                const err = await res.json()
+                toast.error(`Gagal menghapus: ${err.error || 'Unknown error'}`)
+            }
+        } catch (error) {
+            toast.error("Terjadi kesalahan saat menghapus")
         }
     }
 
@@ -141,9 +156,30 @@ export default function EmployeesPage() {
                                             )}
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
+                                            <AlertDialog>
+                                                <AlertDialogTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </AlertDialogTrigger>
+                                                <AlertDialogContent>
+                                                    <AlertDialogHeader>
+                                                        <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
+                                                        <AlertDialogDescription>
+                                                            Tindakan ini tidak dapat dibatalkan. Data karyawan <strong>{emp.name}</strong> beserta riwayat wajah akan dihapus permanen.
+                                                        </AlertDialogDescription>
+                                                    </AlertDialogHeader>
+                                                    <AlertDialogFooter>
+                                                        <AlertDialogCancel>Batal</AlertDialogCancel>
+                                                        <AlertDialogAction
+                                                            onClick={() => handleDelete(emp.id)}
+                                                            className="bg-red-600 hover:bg-red-700 text-white"
+                                                        >
+                                                            Hapus
+                                                        </AlertDialogAction>
+                                                    </AlertDialogFooter>
+                                                </AlertDialogContent>
+                                            </AlertDialog>
                                         </TableCell>
                                     </TableRow>
                                 ))

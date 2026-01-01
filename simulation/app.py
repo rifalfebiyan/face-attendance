@@ -10,6 +10,8 @@ import json
 import base64
 import cv2
 from datetime import datetime, date, timedelta, timezone
+import mediapipe as mp
+from scipy.spatial import distance as dist
 
 from dotenv import load_dotenv
 
@@ -19,7 +21,58 @@ app = Flask(__name__)
 # Enable CORS for HTTP
 CORS(app)
 # Enable SocketIO with CORS
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# --- Liveness Detection Setup ---
+mp_face_mesh = mp.solutions.face_mesh
+# Use a global instance or per-request? Global is better for performance but not thread-safe if processed in parallel?
+# SocketIO threading mode: requests are concurrent. MediaPipe FaceMesh is not strictly thread-safe.
+# However, usually we instantiate it per claim or use a lock.
+# For simplicity in this demo, we can instantiate it inside the processing function or use a pool.
+# Instantiating per frame is expensive.
+# Let's try one global instance and see (Thread safety might be an issue, but standard GIL helps).
+# Better: Create a dictionary of FaceMesh objects keyed by session ID if possible, or just one global guarded by Lock.
+# Actually, let's keep it simple: Instantiate inside the session state object or just once globally and risk it (usually fine for single generic worker).
+
+# Let's use a class to manage state per client
+class ClientState:
+    def __init__(self):
+        self.blink_counter = 0
+        self.total_blinks = 0
+        self.last_blink_time = None
+        self.is_live = False
+        # Initialize FaceMesh per client to avoid thread conflicts and state mixups
+        self.face_mesh = mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+
+# Global state store: { sid: ClientState }
+client_states = {}
+
+# Constants for EAR
+EYE_AR_THRESH = 0.25 # Threshold below which eye is considered closed
+EYE_AR_CONSEC_FRAMES = 3 # Increased to 3 to filter out noise
+LIVENESS_TIMEOUT = 5.0 # Seconds liveness remains valid after a blink
+
+# Eye Landmarks (MediaPipe)
+# Left eye indices
+LEFT_EYE = [362, 385, 387, 263, 373, 380]
+# Right eye indices
+RIGHT_EYE = [33, 160, 158, 133, 153, 144]
+
+def calculate_ear(landmarks, indices):
+    # Euclidean distance between vertical eye landmarks
+    A = dist.euclidean(landmarks[indices[1]], landmarks[indices[5]])
+    B = dist.euclidean(landmarks[indices[2]], landmarks[indices[4]])
+    # Euclidean distance between horizontal eye landmarks
+    C = dist.euclidean(landmarks[indices[0]], landmarks[indices[3]])
+    # Compute EAR
+    ear = (A + B) / (2.0 * C)
+    return ear
+
 
 # Supabase Configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -82,7 +135,48 @@ def health_check():
         "note": "This API does not serve a web UI. Use endpoints directly."
     }), 200
 
+
 # --- HTTP Endpoints ---
+
+@app.route('/login', methods=['POST'])
+def login():
+    try:
+        email = request.form.get('email')
+        password = request.form.get('password')
+
+        if not email or not password:
+            return jsonify({"success": False, "error": "Email and password required"}), 400
+
+        # Query user from Supabase
+        response = supabase.table('users').select("*").eq('email', email).execute()
+        users = response.data
+
+        if not users:
+            return jsonify({"success": False, "error": "Invalid email or password"}), 401
+
+        user = users[0]
+
+        # Verify password (Plain text for prototype as per SQL seed)
+        # TODO: Use werkzeug.security.check_password_hash in production
+        if user['password'] != password:
+            return jsonify({"success": False, "error": "Invalid email or password"}), 401
+
+        # Generate simple token (or just return success for frontend cookie)
+        # In a real app, generate JWT here.
+        return jsonify({
+            "success": True, 
+            "token": f"user_{user['id']}_{int(datetime.now().timestamp())}", 
+            "user": {
+                "id": user['id'],
+                "email": user['email'],
+                "name": user['name']
+            }
+        })
+
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/register', methods=['POST'])
 def register():
@@ -253,6 +347,22 @@ def get_employees():
         print(f"Error fetching employees: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/employees/<id>', methods=['DELETE'])
+def delete_employee(id):
+    try:
+        # 1. Delete from Supabase
+        response = supabase.table('employees').delete().eq('id', id).execute()
+        
+        # 2. Remove from Local Cache
+        if id in known_faces_cache:
+            del known_faces_cache[id]
+            print(f"Removed user {id} from cache.")
+
+        return jsonify({"success": True, "message": f"User {id} deleted successfully"})
+    except Exception as e:
+        print(f"Error deleting employee: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/settings', methods=['GET', 'POST'])
 def handle_settings():
     if request.method == 'GET':
@@ -297,12 +407,72 @@ def get_current_schedule():
     except:
         return {"start_time": "08:00", "end_time": "17:00", "late_tolerance_minutes": 15}
 
-def process_image_for_recognition(image):
+def process_image_for_recognition(image, sid=None):
+    # 0. Get Client State
+    state = None
+    if sid:
+        if sid not in client_states:
+            client_states[sid] = ClientState()
+        state = client_states[sid]
+
+    liveness_status = "Unknown"
+    
+    # 1. Liveness Detection (MediaPipe)
+    if state:
+        # Check if liveness is still valid
+        if state.last_blink_time and (datetime.now() - state.last_blink_time).total_seconds() < LIVENESS_TIMEOUT:
+            state.is_live = True
+        else:
+            state.is_live = False
+
+        # Process frame for blinks
+        # MediaPipe needs RGB (already converted)
+        results = state.face_mesh.process(image)
+        
+        if results.multi_face_landmarks:
+            for face_landmarks in results.multi_face_landmarks:
+                # Convert landmarks to numpy array for easier indexing if needed, 
+                # but we can access .x .y directly.
+                # However, calculate_ear uses indices on a list of (x,y) tuples usually.
+                # Let's extract coords.
+                h, w, _ = image.shape
+                landmarks = [(lm.x * w, lm.y * h) for lm in face_landmarks.landmark]
+                
+                leftEAR = calculate_ear(landmarks, LEFT_EYE)
+                rightEAR = calculate_ear(landmarks, RIGHT_EYE)
+                ear = (leftEAR + rightEAR) / 2.0
+                # print(f"EAR: {ear:.2f} | Count: {state.blink_counter}") # Debug EAR
+                
+                if ear < EYE_AR_THRESH:
+                    state.blink_counter += 1
+                else:
+                    if state.blink_counter >= EYE_AR_CONSEC_FRAMES:
+                        state.total_blinks += 1
+                        state.last_blink_time = datetime.now()
+                        state.is_live = True # Liveness confirmed!
+                        print(f"Blink detected! Total: {state.total_blinks}")
+                    state.blink_counter = 0
+        
+        liveness_status = "Live" if state.is_live else "Spoof/Photo - Please Blink"
+
+    # If NOT live, we can choose to return early or return a specific status
+    # To secure it: strictly block recognition if not live.
+    if state and not state.is_live:
+         return {
+            "success": False, 
+            "error": "Liveness Check Failed",
+            "message": "Silakan berkedip untuk verifikasi.",
+            "is_live": False
+        }
+
+    # 2. Face Recognition (dlib)
+    # Only proceed if live
+    
     face_locations = face_recognition.face_locations(image)
     face_encodings = face_recognition.face_encodings(image, face_locations)
 
     if not face_encodings:
-         return {"success": False, "error": "No face detected"}
+         return {"success": False, "error": "No face detected", "is_live": state.is_live if state else False}
 
     unknown_encoding = face_encodings[0]
     
@@ -337,7 +507,8 @@ def process_image_for_recognition(image):
                     "name": best_match_name, 
                     "time": current_time.isoformat(), 
                     "status": "Cooldown" 
-                }
+                },
+                "is_live": True
             }
         
         last_processed_cache[best_match_id] = current_time
@@ -431,10 +602,11 @@ def process_image_for_recognition(image):
                 "name": best_match_name,
                 "time": datetime.now().isoformat(),
                 "status": status
-            }
+            },
+            "is_live": True
         }
     else:
-         return {"success": False, "error": "Unknown face"}
+         return {"success": False, "error": "Unknown face", "is_live": True}
 
 def base64_to_image(base64_string):
     if "base64," in base64_string:
@@ -449,17 +621,26 @@ def base64_to_image(base64_string):
 
 @socketio.on('connect')
 def handle_connect():
-    print('Client connected')
+    sid = request.sid
+    print(f'Client connected: {sid}')
+    # Initialize state
+    client_states[sid] = ClientState()
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    print('Client disconnected')
+    sid = request.sid
+    print(f'Client disconnected: {sid}')
+    # Clean up
+    if sid in client_states:
+        del client_states[sid]
 
 @socketio.on('process_frame')
 def handle_process_frame(data):
     try:
+        sid = request.sid
         image = base64_to_image(data.get('image', ''))
-        result = process_image_for_recognition(image)
+        # Pass SID to use process-state
+        result = process_image_for_recognition(image, sid=sid)
         emit('attendance_result', result)
     except Exception as e:
         print(f"Socket processing error: {e}")

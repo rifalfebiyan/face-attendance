@@ -4,3 +4,4 @@ face_recognition
 numpy
 opencv-python
 python-dotenv
+mediapipe

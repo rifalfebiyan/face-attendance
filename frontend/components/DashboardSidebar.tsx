@@ -98,7 +98,14 @@ export function DashboardSidebar({ className }: SidebarProps) {
                 </div>
             </div>
             <div className="px-3 py-2 mt-auto absolute bottom-4 w-full">
-                <Button variant="ghost" className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50">
+                <Button
+                    variant="ghost"
+                    className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50"
+                    onClick={async () => {
+                        await fetch('/api/logout', { method: 'POST' })
+                        window.location.href = '/login'
+                    }}
+                >
                     <LogOut className="mr-2 h-4 w-4" />
                     Keluar
                 </Button>
