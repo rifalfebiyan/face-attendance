@@ -1,0 +1,48 @@
+# Systems
+.DS_Store
+Thumbs.db
+*.log
+
+# Editor & IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Node.js / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# Python / Simulation
+simulation/venv/
+simulation/.venv/
+simulation/__pycache__/
+simulation/*.py[cod]
+simulation/*$py.class
+simulation/.pytest_cache/
+simulation/.coverage
+simulation/htmlcov/
+simulation/*.spec
+
+# General
+node_modules/
+__pycache__/
+dist/
+build/
+coverage/
