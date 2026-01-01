@@ -27,6 +27,16 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
+import { Settings } from "lucide-react"
 
 // Define Employee Type
 interface Employee {
@@ -34,16 +44,24 @@ interface Employee {
     name: string
     created_at?: string
     face_encoding?: any
+    shift_id?: number
 }
 
 export default function EmployeesPage() {
     const [employees, setEmployees] = useState<Employee[]>([])
+    const [shifts, setShifts] = useState<any[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
+    const [openShiftDialog, setOpenShiftDialog] = useState(false)
+    const [selectedShiftId, setSelectedShiftId] = useState<string>("")
+
+    // Fallback if env not set
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5001"
 
     const fetchEmployees = async () => {
         setIsLoading(true)
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/employees`, {
+            const res = await fetch(`${API_URL}/employees`, {
                 headers: { "ngrok-skip-browser-warning": "true" }
             })
             if (res.ok) {
@@ -60,9 +78,47 @@ export default function EmployeesPage() {
         }
     }
 
+    const fetchShifts = async () => {
+        try {
+            const res = await fetch(`${API_URL}/shifts`, {
+                headers: { "ngrok-skip-browser-warning": "true" }
+            })
+            const data = await res.json()
+            if (data.success) setShifts(data.data)
+        } catch (e) { console.error(e) }
+    }
+
+    const handleAssignShift = async () => {
+        if (!selectedEmployee) return
+        try {
+            const res = await fetch(`${API_URL}/employees/${selectedEmployee.id}/shift`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ shift_id: selectedShiftId })
+            })
+
+            if (res.ok) {
+                toast.success("Shift berhasil diupdate")
+                setOpenShiftDialog(false)
+                fetchEmployees()
+            } else {
+                toast.error("Gagal update shift")
+            }
+        } catch (e) {
+            toast.error("Error updating shift")
+        }
+    }
+
+    const openAssignShift = (emp: any) => {
+        setSelectedEmployee(emp)
+        // @ts-ignore
+        setSelectedShiftId(emp.shift_id ? String(emp.shift_id) : "")
+        setOpenShiftDialog(true)
+    }
+
     const handleDelete = async (id: string) => {
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/employees/${id}`, {
+            const res = await fetch(`${API_URL}/employees/${id}`, {
                 method: "DELETE",
                 headers: { "ngrok-skip-browser-warning": "true" }
             })
@@ -81,6 +137,7 @@ export default function EmployeesPage() {
 
     useEffect(() => {
         fetchEmployees()
+        fetchShifts()
     }, [])
 
     return (
@@ -117,19 +174,20 @@ export default function EmployeesPage() {
                                 <TableHead>Nama Lengkap</TableHead>
                                 <TableHead>NIP / ID</TableHead>
                                 <TableHead>Status Wajah</TableHead>
+                                <TableHead>Shift</TableHead>
                                 <TableHead className="text-right">Aksi</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {isLoading ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                                         Memuat data...
                                     </TableCell>
                                 </TableRow>
                             ) : employees.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                                         Belum ada data karyawan.
                                     </TableCell>
                                 </TableRow>
@@ -153,6 +211,32 @@ export default function EmployeesPage() {
                                                 <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">
                                                     Belum
                                                 </span>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            {emp.shift_id ? (
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                                        {shifts.find(s => s.id === emp.shift_id)?.name || "Shift #" + emp.shift_id}
+                                                    </Badge>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-6 w-6"
+                                                        onClick={() => openAssignShift(emp)}
+                                                    >
+                                                        <Settings className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => openAssignShift(emp)}
+                                                    className="h-7 text-xs"
+                                                >
+                                                    Set Shift
+                                                </Button>
                                             )}
                                         </TableCell>
                                         <TableCell className="text-right">
@@ -188,6 +272,31 @@ export default function EmployeesPage() {
                     </Table>
                 </CardContent>
             </Card>
+            <Dialog open={openShiftDialog} onOpenChange={setOpenShiftDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Atur Shift Kerja</DialogTitle>
+                        <DialogDescription>
+                            Pilih shift untuk karyawan <strong>{selectedEmployee?.name}</strong>.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <select
+                            className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            value={selectedShiftId}
+                            onChange={(e) => setSelectedShiftId(e.target.value)}
+                        >
+                            <option value="">-- Pilih Shift --</option>
+                            {shifts.map(s => (
+                                <option key={s.id} value={s.id}>{s.name} ({s.start_time} - {s.end_time})</option>
+                            ))}
+                        </select>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={handleAssignShift}>Simpan</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

@@ -13,7 +13,9 @@ import {
     Camera,
     UserPlus,
     ScanFace,
-    FileText
+    FileText,
+    Clock,
+    CalendarCheck
 } from "lucide-react"
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
@@ -31,6 +33,16 @@ export function DashboardSidebar({ className }: SidebarProps) {
             title: "Data Karyawan",
             href: "/employees",
             icon: Users,
+        },
+        {
+            title: "Jadwal Shift",
+            href: "/shifts",
+            icon: Clock,
+        },
+        {
+            title: "Izin & Cuti",
+            href: "/leaves",
+            icon: CalendarCheck,
         },
         {
             title: "Laporan Presensi",
@@ -53,7 +65,7 @@ export function DashboardSidebar({ className }: SidebarProps) {
                             <ScanFace className="h-5 w-5 text-primary" />
                         </div>
                         <h2 className="text-lg font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                            FacePresence
+                            Warunk Digital
                         </h2>
                     </div>
 

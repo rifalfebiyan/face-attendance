@@ -170,7 +170,7 @@ export default function LoginPage() {
 
             {/* Footer */}
             <div className="absolute bottom-6 text-center text-xs text-gray-500">
-                &copy; 2024 Face Attendance System. Secure & Protected.
+                &copy; 2024 Warunk Digital. Secure & Protected.
             </div>
         </div>
     )

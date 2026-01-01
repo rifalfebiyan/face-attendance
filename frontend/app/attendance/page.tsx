@@ -147,7 +147,7 @@ export default function AttendancePage() {
             {/* Footer / Instructions */}
             <div className="mt-12 text-center text-muted-foreground/50 text-xs">
                 <p>Pastikan pencahayaan ruangan cukup baik.</p>
-                <p>&copy; {new Date().getFullYear()} Face Attendance System</p>
+                <p>&copy; {new Date().getFullYear()} Warunk Digital</p>
             </div>
         </div>
     )
