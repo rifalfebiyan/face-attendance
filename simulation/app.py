@@ -12,6 +12,9 @@ import cv2
 from datetime import datetime, date, timedelta, timezone
 import mediapipe as mp
 from scipy.spatial import distance as dist
+import pandas as pd
+import io
+from werkzeug.utils import secure_filename
 
 from dotenv import load_dotenv
 
@@ -169,7 +172,8 @@ def login():
             "user": {
                 "id": user['id'],
                 "email": user['email'],
-                "name": user['name']
+                "name": user['name'],
+                "role": user.get('role', 'admin')  # Return role
             }
         })
 
@@ -315,8 +319,9 @@ def get_reports():
         start_ts = f"{start_date}T00:00:00"
         end_ts = f"{end_date}T23:59:59"
 
+        # Join with employees AND shifts (directly linked to log now)
         logs_res = supabase.table('attendance_logs')\
-            .select("*, employees(name)")\
+            .select("*, employees(name), shifts(name, start_time, end_time)")\
             .gte("timestamp", start_ts)\
             .lte("timestamp", end_ts)\
             .order("timestamp", desc=True)\
@@ -324,12 +329,28 @@ def get_reports():
             
         data = []
         for log in logs_res.data:
+             emp = log.get('employees', {})
+             
+             # Priority: Shift logged in attendance > Shift currently assigned to employee
+             log_shift = log.get('shifts') # relation: attendance_logs.shift_id -> shifts.id
+             
+             if log_shift:
+                 shift_name = f"{log_shift.get('name')} ({log_shift.get('start_time')}-{log_shift.get('end_time')})"
+             else:
+                 # Fallback for old logs (before we added shift_id)
+                 emp_shift = emp.get('shifts') if emp and isinstance(emp, dict) and 'shifts' in emp else None
+                 if emp_shift:
+                      shift_name = f"{emp_shift.get('name')} ({emp_shift.get('start_time')}-{emp_shift.get('end_time')}) (Current)"
+                 else:
+                      shift_name = "No Shift"
+
              data.append({
                 "id": log['id'],
-                "name": log['employees']['name'] if log.get('employees') else "Unknown",
+                "name": emp.get('name', 'Unknown') if emp else 'Unknown',
                 "employee_id": log['employee_id'],
                 "timestamp": log['timestamp'],
-                "status": log['status']
+                "status": log['status'],
+                "shift": shift_name
              })
              
         return jsonify({"success": True, "data": data})
@@ -346,6 +367,19 @@ def get_employees():
     except Exception as e:
         print(f"Error fetching employees: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/employees/<id>/shift', methods=['PUT'])
+def update_employee_shift(id):
+    try:
+        data = request.json
+        shift_id = data.get('shift_id')
+        # Convert empty string to None
+        value = int(shift_id) if shift_id else None
+        
+        supabase.table('employees').update({"shift_id": value}).eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/employees/<id>', methods=['DELETE'])
 def delete_employee(id):
@@ -395,6 +429,164 @@ def handle_settings():
             return jsonify({"success": True})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
+
+# --- NEW: Shifts Management ---
+@app.route('/shifts', methods=['GET', 'POST'])
+def handle_shifts():
+    if request.method == 'GET':
+        try:
+            res = supabase.table('shifts').select("*").order('id').execute()
+            return jsonify({"success": True, "data": res.data})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    if request.method == 'POST':
+        try:
+            data = request.json
+            shift = {
+                "name": data.get("name"),
+                "start_time": data.get("start_time"),
+                "end_time": data.get("end_time"),
+                "late_tolerance_minutes": int(data.get("late_tolerance_minutes", 15))
+            }
+            if 'id' in data: # Update
+                 supabase.table('shifts').update(shift).eq('id', data['id']).execute()
+            else: # Insert
+                 supabase.table('shifts').insert(shift).execute()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/shifts/<id>', methods=['DELETE'])
+def delete_shift(id):
+    try:
+        supabase.table('shifts').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- NEW: Leaves Management ---
+@app.route('/leaves', methods=['GET', 'POST'])
+def handle_leaves():
+    if request.method == 'GET':
+        try:
+            # Join with employees to get names
+            res = supabase.table('leaves').select("*, employees(name)").order('created_at', desc=True).execute()
+            
+            # Flatten structure for frontend
+            leaves = []
+            for l in res.data:
+                l['employee_name'] = l['employees']['name'] if l.get('employees') else 'Unknown'
+                del l['employees']
+                leaves.append(l)
+                
+            return jsonify({"success": True, "data": leaves})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    if request.method == 'POST':
+        try:
+            data = request.json
+            leave = {
+                "employee_id": data.get("employee_id"),
+                "type": data.get("type"),
+                "start_date": data.get("start_date"),
+                "end_date": data.get("end_date"),
+                "reason": data.get("reason"),
+                "status": "Pending"
+            }
+            supabase.table('leaves').insert(leave).execute()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/leaves/<id>', methods=['PUT', 'DELETE'])
+def update_leave(id):
+    try:
+        if request.method == 'DELETE':
+             supabase.table('leaves').delete().eq('id', id).execute()
+             return jsonify({"success": True})
+        
+        # PUT (Update Status)
+        data = request.json
+        supabase.table('leaves').update({"status": data.get("status")}).eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- NEW: Manual Attendance ---
+@app.route('/attendance/manual', methods=['POST'])
+def manual_attendance():
+    try:
+        data = request.json
+        employee_id = data.get("employee_id")
+        timestamp = data.get("timestamp") # ISO string
+        status = data.get("status")
+        
+        # 1. Fetch current shift_id of the employee
+        emp_res = supabase.table('employees').select('shift_id').eq('id', employee_id).execute()
+        shift_id = emp_res.data[0]['shift_id'] if emp_res.data else None
+
+        # 2. Insert log with shift_id
+        log = {
+            "employee_id": employee_id,
+            "timestamp": timestamp,
+            "status": status,
+            "shift_id": shift_id, # Store historical shift
+            "confidence_score": 1.0
+        }
+        supabase.table('attendance_logs').insert(log).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- NEW: Export Excel ---
+@app.route('/reports/export', methods=['GET'])
+def export_reports():
+    try:
+        start_date = request.args.get('start_date', date.today().isoformat())
+        end_date = request.args.get('end_date', date.today().isoformat())
+        
+        start_ts = f"{start_date}T00:00:00"
+        end_ts = f"{end_date}T23:59:59"
+
+        # Fetch data
+        logs_res = supabase.table('attendance_logs')\
+            .select("timestamp, status, employees(name, id)")\
+            .gte("timestamp", start_ts)\
+            .lte("timestamp", end_ts)\
+            .order("timestamp", desc=True)\
+            .execute()
+        
+        data = []
+        for log in logs_res.data:
+            data.append({
+                "Tanggal": log['timestamp'][:10],
+                "Jam": log['timestamp'][11:19],
+                "Nama Karyawan": log['employees']['name'] if log.get('employees') else "Unknown",
+                "ID Karyawan": log['employees']['id'] if log.get('employees') else log.get('employee_id'),
+                "Status": log['status']
+            })
+            
+        df = pd.DataFrame(data)
+        
+        # Generate Excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Presensi')
+        
+        output.seek(0)
+        
+        return flask.send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f'Laporan_Presensi_{start_date}_{end_date}.xlsx'
+        )
+            
+    except Exception as e:
+        print(f"Export Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # --- Helper Functions ---
 
@@ -513,36 +705,54 @@ def process_image_for_recognition(image, sid=None):
         
         last_processed_cache[best_match_id] = current_time
 
-        # Check today's attendance for this user
-        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        # Check recent attendance for this user (Lookback 20 hours to cover night shifts/timezone diffs)
+        lookback_time = (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()
         
         try:
-            # Fetch ALL logs for today to determine state
+            # Fetch logs for the last 20 hours
             response = supabase.table('attendance_logs')\
                 .select("*")\
                 .eq('employee_id', best_match_id)\
-                .gte('timestamp', today_start)\
+                .gte('timestamp', lookback_time)\
                 .order('timestamp', desc=True)\
                 .execute()
             
             logs = response.data
             
-            # Determine current state
-            has_check_in = any(l['status'] in ['Masuk', 'Terlambat'] for l in logs)
-            has_check_out = any(l['status'] == 'Pulang' for l in logs)
+            # Determine current state based on LATEST log
+            # If latest log is 'Masuk' or 'Terlambat', then we are currently checked in.
+            # If latest log is 'Pulang' or empty, we are checked out.
+            
+            if logs:
+                latest_status = logs[0]['status']
+                has_check_in = latest_status in ['Masuk', 'Terlambat']
+                has_check_out = latest_status == 'Pulang' # Or arguably, if latest is Pulang, has_check_in is False for *new* session
+            else:
+                has_check_in = False
+                has_check_out = False
+                
+            # Refined Logic:
+            # If last log was "Masuk/Terlambat", we are IN -> Next action: Pulang
+            # If last log was "Pulang", we are OUT -> Next action: Masuk
             
             status = "Masuk" # Default intention
             should_insert = False
             
             schedule = get_current_schedule()
             
+            # Fetch employee specific shift (moved up to be available for both IN/OUT and logging)
+            emp_shift_res = supabase.table('employees').select('shifts(*)').eq('id', best_match_id).single().execute()
+            emp_shift = emp_shift_res.data.get('shifts') if emp_shift_res.data else None
+            
+            current_shift_id = emp_shift.get('id') if emp_shift else None
+            current_schedule = emp_shift if emp_shift else schedule
+
             if not has_check_in:
                 # Rule 1: Check-in (First time only)
                 should_insert = True
                 
-                # Check for Late
-                start_time_str = schedule.get('start_time', '08:00')
-                tolerance = schedule.get('late_tolerance_minutes', 15)
+                start_time_str = current_schedule.get('start_time', '08:00')
+                tolerance = current_schedule.get('late_tolerance_minutes', 15)
                 
                 time_parts = list(map(int, start_time_str.split(':')))
                 st_hour = time_parts[0]
@@ -558,7 +768,8 @@ def process_image_for_recognition(image, sid=None):
             
             elif has_check_in and not has_check_out:
                 # Rule 2: Check-out (Only after end_time)
-                end_time_str = schedule.get('end_time', '17:00')
+                # Use current_schedule (which respects employee shift) instead of global schedule
+                end_time_str = current_schedule.get('end_time', '17:00')
                 
                 # Parse end time
                 et_parts = list(map(int, end_time_str.split(':')))
@@ -571,9 +782,11 @@ def process_image_for_recognition(image, sid=None):
                     status = "Pulang"
                     should_insert = True
                 else:
-                    # Not yet time to go home
-                    status = "Belum Waktu Pulang"
-                    should_insert = False
+                    # UPDATED LOGIC: If checking out early, maybe "Pulang Cepat" or just allow it?
+                    # For now, let's allow it but mark as Pulang (or could implement early departure)
+                    status = "Pulang" # Simply allow checkout whenever they face scan again after checkin
+                    should_insert = True
+
             
             else:
                 # Already checked in and checked out
@@ -587,7 +800,8 @@ def process_image_for_recognition(image, sid=None):
                 log_data = {
                     "employee_id": best_match_id,
                     "status": status,
-                    "timestamp": utc_now
+                    "timestamp": utc_now,
+                    "shift_id": current_shift_id # Store historical shift
                 }
                 supabase.table('attendance_logs').insert(log_data).execute()
 
