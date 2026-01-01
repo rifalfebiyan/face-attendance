@@ -255,11 +255,7 @@ export default function RegisterPage() {
                 </CardContent>
             </Card>
 
-            <div className="fixed bottom-6 left-6">
-                <Link href="/dashboard">
-                    <Button variant="secondary">Kembali ke Dashboard</Button>
-                </Link>
-            </div>
+
         </div>
     )
 }
