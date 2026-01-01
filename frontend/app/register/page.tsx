@@ -189,7 +189,7 @@ export default function RegisterPage() {
                                         ref={cameraRef}
                                         onResult={handleWebSocketResult}
                                         // autoCapture=true by default, so it helps us know if face is in frame
-                                        serverUrl="http://localhost:5001"
+                                        serverUrl={process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}
                                     />
 
                                     <div className="flex justify-center flex-col items-center gap-2">

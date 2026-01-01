@@ -31,7 +31,9 @@ export default function Dashboard() {
     useEffect(() => {
         const fetchStats = async () => {
             try {
-                const res = await fetch(`http://localhost:5001/stats?date=${selectedDate}`)
+                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stats?date=${selectedDate}`, {
+                    headers: { "ngrok-skip-browser-warning": "true" }
+                })
                 const data = await res.json()
                 if (!data.error) {
                     setStats(data)

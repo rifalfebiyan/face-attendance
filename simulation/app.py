@@ -11,6 +11,10 @@ import base64
 import cv2
 from datetime import datetime, date, timedelta, timezone
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 app = Flask(__name__)
 # Enable CORS for HTTP
 CORS(app)
@@ -18,8 +22,8 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Supabase Configuration
-SUPABASE_URL = "https://nmiwdhrivuolmnddwcge.supabase.co"
-SUPABASE_KEY = "sb_publishable_9536nM2zv2xK01gLQ0Dtlw_3CZ7PqD4"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Global storage for face encodings (cache for fast recognition)
@@ -55,6 +59,28 @@ def load_data_from_supabase():
 
 # Load data on startup
 load_data_from_supabase()
+
+# --- ✅ NEW: Root Health-Check Route (tidak mengganggu logika lain) ---
+@app.route('/')
+def health_check():
+    return jsonify({
+        "status": "OK",
+        "service": "Face Recognition Attendance API",
+        "port": 5001,
+        "flask_version": flask.__version__,
+        "uptime": datetime.now().isoformat(),
+        "cached_users": len(known_faces_cache),
+        "endpoints": [
+            "POST /register",
+            "POST /verify",
+            "GET /stats",
+            "GET /reports",
+            "GET /employees",
+            "GET,POST /settings",
+            "WebSocket: /socket.io"
+        ],
+        "note": "This API does not serve a web UI. Use endpoints directly."
+    }), 200
 
 # --- HTTP Endpoints ---
 

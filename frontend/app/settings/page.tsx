@@ -23,24 +23,29 @@ import { Clock } from "lucide-react"
 const settingsSchema = z.object({
     start_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Format jam salah (HH:MM)"),
     end_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Format jam salah (HH:MM)"),
-    late_tolerance_minutes: z.coerce.number().min(0, "Toleransi minimal 0 menit"),
+    late_tolerance_minutes: z.number().min(0, "Toleransi minimal 0 menit"),
 })
+
+type SettingsFormValues = z.infer<typeof settingsSchema>
 
 export default function SettingsPage() {
     const [isLoading, setIsLoading] = useState(true)
 
-    const form = useForm<z.infer<typeof settingsSchema>>({
+    const form = useForm<SettingsFormValues>({
         resolver: zodResolver(settingsSchema),
         defaultValues: {
             start_time: "08:00",
             end_time: "17:00",
             late_tolerance_minutes: 15,
         },
+        mode: "onChange",
     })
 
     useEffect(() => {
         // Fetch current settings
-        fetch("http://localhost:5001/settings")
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}/settings`, {
+            headers: { "ngrok-skip-browser-warning": "true" }
+        })
             .then(res => res.json())
             .then(data => {
                 if (data && !data.error) {
@@ -55,11 +60,14 @@ export default function SettingsPage() {
             .finally(() => setIsLoading(false))
     }, [form])
 
-    async function onSubmit(values: z.infer<typeof settingsSchema>) {
+    async function onSubmit(values: SettingsFormValues) {
         try {
-            const res = await fetch("http://localhost:5001/settings", {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}/settings`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "ngrok-skip-browser-warning": "true"
+                },
                 body: JSON.stringify(values),
             })
 
@@ -132,7 +140,11 @@ export default function SettingsPage() {
                                     <FormItem>
                                         <FormLabel>Toleransi Keterlambatan (Menit)</FormLabel>
                                         <FormControl>
-                                            <Input type="number" {...field} />
+                                            <Input
+                                                type="number"
+                                                {...field}
+                                                onChange={event => field.onChange(+event.target.value || 0)}
+                                            />
                                         </FormControl>
                                         <FormDescription>
                                             Minsal: 15 menit. Jika jam masuk 08:00, absen 08:16 dianggap terlambat.
@@ -150,3 +162,5 @@ export default function SettingsPage() {
         </div>
     )
 }
+
+

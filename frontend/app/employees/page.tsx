@@ -46,7 +46,9 @@ export default function EmployeesPage() {
             // I will use the `stats` endpoint if it had the list. It doesn't.
 
             // Let's assume we will add /employees to app.py shortly.
-            const res = await fetch("http://localhost:5001/employees")
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/employees`, {
+                headers: { "ngrok-skip-browser-warning": "true" }
+            })
             if (res.ok) {
                 const data = await res.json()
                 setEmployees(data.employees || [])

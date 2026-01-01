@@ -24,7 +24,9 @@ export default function ReportsPage() {
     const fetchReports = async () => {
         setLoading(true)
         try {
-            const res = await fetch(`http://localhost:5001/reports?start_date=${startDate}&end_date=${endDate}`)
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/reports?start_date=${startDate}&end_date=${endDate}`, {
+                headers: { "ngrok-skip-browser-warning": "true" }
+            })
             const data = await res.json()
             if (data.success) {
                 setLogs(data.data)

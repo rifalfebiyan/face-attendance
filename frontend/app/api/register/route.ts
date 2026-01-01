@@ -6,10 +6,14 @@ export async function POST(req: NextRequest) {
 
         // Proxy to Flask API
         // Note: Assuming Flask runs on http://127.0.0.1:5000
-        const flaskRes = await fetch("http://127.0.0.1:5001/register", {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5001"
+        const flaskRes = await fetch(`${apiUrl}/register`, {
             method: "POST",
             body: formData,
-            // We don't need to set Content-Type for FormData, fetch does it automatically
+            // We don't need to set Content-Type for FormData however we do need to skip ngrok browser warning
+            headers: {
+                "ngrok-skip-browser-warning": "true"
+            }
         })
 
         const data = await flaskRes.json()

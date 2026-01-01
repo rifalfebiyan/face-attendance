@@ -33,7 +33,7 @@ let socket: Socket | null = null;
 
 export const WebSocketCamera = forwardRef<WebSocketCameraRef, WebSocketCameraProps>(({
     onResult,
-    serverUrl = "http://localhost:5001",
+    serverUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001",
     intervalMs = 500,
     autoCapture = true
 }, ref) => {

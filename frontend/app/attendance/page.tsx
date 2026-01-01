@@ -55,7 +55,7 @@ export default function AttendancePage() {
             <div className="w-full max-w-4xl relative">
                 <WebSocketCamera
                     onResult={handleResult}
-                    serverUrl="http://localhost:5001"
+                    serverUrl={process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001"}
                 />
             </div>
 
