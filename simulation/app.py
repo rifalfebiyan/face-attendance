@@ -399,6 +399,13 @@ def delete_employee(id):
             del known_faces_cache[id]
             print(f"Removed user {id} from cache.")
 
+        if id in known_faces_cache:
+            del known_faces_cache[id]
+            print(f"Removed user {id} from cache.")
+
+        # --- Audit Log ---
+        log_activity("Admin", "DELETE_EMPLOYEE", target_id=id, details={})
+
         return jsonify({"success": True, "message": f"User {id} deleted successfully"})
     except Exception as e:
         print(f"Error deleting employee: {e}")
@@ -468,6 +475,10 @@ def handle_shifts():
 def delete_shift(id):
     try:
         supabase.table('shifts').delete().eq('id', id).execute()
+        
+        # --- Audit Log ---
+        log_activity("Admin", "DELETE_SHIFT", target_id=id, details={})
+
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -519,6 +530,10 @@ def update_leave(id):
     try:
         if request.method == 'DELETE':
              supabase.table('leaves').delete().eq('id', id).execute()
+             
+             # --- Audit Log ---
+             log_activity("Admin", "DELETE_LEAVE", target_id=id, details={})
+
              return jsonify({"success": True})
         
         # PUT (Update Status)
@@ -772,6 +787,23 @@ def get_analytics_top_late():
 
     except Exception as e:
          print(f"Analytics Top Late Error: {e}")
+         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/audit-logs', methods=['GET'])
+def get_audit_logs():
+    try:
+        # Default fetch last 50
+        limit = request.args.get('limit', 50)
+        
+        response = supabase.table('audit_logs')\
+            .select("*")\
+            .order("created_at", desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        return jsonify({"success": True, "data": response.data})
+    except Exception as e:
+         print(f"Audit Logs Fetch Error: {e}")
          return jsonify({"success": False, "error": str(e)}), 500
 
 # --- Helper Functions ---

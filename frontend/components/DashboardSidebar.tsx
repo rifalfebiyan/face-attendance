@@ -50,6 +50,11 @@ export function DashboardSidebar({ className }: SidebarProps) {
             icon: FileText,
         },
         {
+            title: "Activity Logs",
+            href: "/logs",
+            icon: History,
+        },
+        {
             title: "Pengaturan",
             href: "/settings",
             icon: Settings,
