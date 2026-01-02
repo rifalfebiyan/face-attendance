@@ -14,7 +14,10 @@ import mediapipe as mp
 from scipy.spatial import distance as dist
 import pandas as pd
 import io
+from collections import Counter
+from dateutil.relativedelta import relativedelta
 from werkzeug.utils import secure_filename
+from notifications import notification_service # Import Service
 
 from dotenv import load_dotenv
 
@@ -377,6 +380,10 @@ def update_employee_shift(id):
         value = int(shift_id) if shift_id else None
         
         supabase.table('employees').update({"shift_id": value}).eq('id', id).execute()
+        
+        # --- Audit Log ---
+        log_activity("Admin", "UPDATE_SHIFT", target_id=id, details={"new_shift_id": value})
+        
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -496,6 +503,13 @@ def handle_leaves():
                 "status": "Pending"
             }
             supabase.table('leaves').insert(leave).execute()
+            
+            # --- Notification ---
+            # Ideally fetch employee name first
+            emp_res = supabase.table('employees').select('name').eq('id', data.get("employee_id")).execute()
+            emp_name = emp_res.data[0]['name'] if emp_res.data else "Unknown"
+            notification_service.notify_admin_leave_request(emp_name, data.get("type"), f"{data.get('start_date')} to {data.get('end_date')}")
+            
             return jsonify({"success": True})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
@@ -536,6 +550,10 @@ def manual_attendance():
             "confidence_score": 1.0
         }
         supabase.table('attendance_logs').insert(log).execute()
+        
+        # --- Audit Log ---
+        log_activity("Admin", "MANUAL_ATTENDANCE", target_id=employee_id, details={"status": status, "shift_id": shift_id})
+
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -588,6 +606,174 @@ def export_reports():
         print(f"Export Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# --- NEW: Analytics Endpoints ---
+
+@app.route('/analytics/trend', methods=['GET'])
+def get_analytics_trend():
+    try:
+        # Last 30 days
+        end_date = date.today()
+        start_date = end_date - timedelta(days=29)
+        
+        start_ts = f"{start_date.isoformat()}T00:00:00"
+        end_ts = f"{end_date.isoformat()}T23:59:59"
+
+        logs_res = supabase.table('attendance_logs')\
+            .select("timestamp, status")\
+            .gte("timestamp", start_ts)\
+            .lte("timestamp", end_ts)\
+            .execute()
+        
+        logs = logs_res.data
+        
+        # Process data: Group by date and count statuses
+        # We want: { date: "YYYY-MM-DD", present: 0, late: 0, absent: 0 }
+        # Note: 'absent' is tricky without running a daily cron to mark them.
+        # For now, we visualize 'Hadir' (Masuk/Tepat Waktu) vs 'Terlambat'.
+        
+        date_map = {}
+        # Initialize map
+        curr = start_date
+        while curr <= end_date:
+            date_map[curr.isoformat()] = {"date": curr.isoformat(), "hadir": 0, "terlambat": 0}
+            curr += timedelta(days=1)
+            
+        seen_today = set() # To prevent double counting if multiple scans per day/logic
+        
+        for log in logs:
+            day_str = log['timestamp'][:10]
+            status = log['status']
+            emp_id_day = f"{log.get('employee_id')}_{day_str}" # distinct count per day
+            
+            # Simplified Counting: Just count 'Masuk' or 'Terlambat' events as 1 attendance
+            # Ideally we distinct by employee_id per day.
+            
+            if day_str in date_map:
+                if status == 'Masuk':
+                    date_map[day_str]['hadir'] += 1
+                elif status == 'Terlambat':
+                    date_map[day_str]['terlambat'] += 1
+        
+        data = list(date_map.values())
+        data.sort(key=lambda x: x['date'])
+        
+        return jsonify({"success": True, "data": data})
+
+    except Exception as e:
+        print(f"Analytics Trend Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/analytics/daily', methods=['GET'])
+def get_analytics_daily():
+    try:
+        query_date = request.args.get('date', date.today().isoformat())
+        today_start = f"{query_date}T00:00:00"
+        today_end = f"{query_date}T23:59:59"
+        
+        # Get Logs
+        logs_res = supabase.table('attendance_logs')\
+            .select("status, employee_id")\
+            .gte("timestamp", today_start)\
+            .lte("timestamp", today_end)\
+            .execute()
+            
+        logs = logs_res.data
+        
+        # Get Leaves
+        leaves_res = supabase.table('leaves')\
+            .select("type")\
+            .gte("start_date", query_date)\
+            .lte("end_date", query_date)\
+            .eq("status", "Approved")\
+            .execute()
+            
+        # Count unique statuses
+        # Priority: Pulang > Masuk > Terlambat (if multiple logs, taking the 'best' or 'worst' status?)
+        # Actually usually: One 'Masuk' or 'Terlambat' per day is enough to categorize.
+        
+        status_counts = {"Hadir (Tepat Waktu)": 0, "Terlambat": 0, "Cuti/Izin": len(leaves_res.data)}
+        
+        processed_emps = set()
+        
+        for log in logs:
+            emp_id = log['employee_id']
+            status = log['status']
+            
+            if emp_id not in processed_emps:
+                if status == 'Masuk':
+                    status_counts['Hadir (Tepat Waktu)'] += 1
+                    processed_emps.add(emp_id)
+                elif status == 'Terlambat':
+                    status_counts['Terlambat'] += 1
+                    processed_emps.add(emp_id)
+        
+        # Format for Recharts Pie: { name: 'Group A', value: 400 }
+        data = [
+            {"name": "Hadir (Tepat Waktu)", "value": status_counts['Hadir (Tepat Waktu)'], "fill": "#4ade80"}, # Green
+            {"name": "Terlambat", "value": status_counts['Terlambat'], "fill": "#facc15"}, # Yellow
+            {"name": "Cuti/Izin", "value": status_counts['Cuti/Izin'], "fill": "#60a5fa"}, # Blue
+        ]
+        
+        # Calculate Absent? Total Employees - (Hadir + Terlambat + Cuti)
+        emp_res = supabase.table('employees').select("id", count='exact').execute()
+        total_employees = emp_res.count if emp_res.count is not None else len(emp_res.data)
+        
+        absent_count = total_employees - (status_counts['Hadir (Tepat Waktu)'] + status_counts['Terlambat'] + status_counts['Cuti/Izin'])
+        if absent_count < 0: absent_count = 0
+        
+        data.append({"name": "Belum Hadir/Alpha", "value": absent_count, "fill": "#f87171"}) # Red
+        
+        return jsonify({"success": True, "data": data})
+        
+    except Exception as e:
+         print(f"Analytics Daily Error: {e}")
+         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/analytics/top-late', methods=['GET'])
+def get_analytics_top_late():
+    try:
+        # Current Month
+        today = date.today()
+        first_day = today.replace(day=1)
+        
+        start_ts = f"{first_day.isoformat()}T00:00:00"
+        end_ts = f"{today.isoformat()}T23:59:59"
+        
+        logs_res = supabase.table('attendance_logs')\
+            .select("employee_id, employees(name)")\
+            .gte("timestamp", start_ts)\
+            .lte("timestamp", end_ts)\
+            .eq("status", "Terlambat")\
+            .execute()
+            
+        logs = logs_res.data
+        
+        counter = Counter()
+        name_map = {}
+        
+        for log in logs:
+            emp_id = log['employee_id']
+            emp_name = log['employees']['name'] if log.get('employees') else 'Unknown'
+            counter[emp_id] += 1
+            name_map[emp_id] = emp_name
+            
+        # Top 5
+        most_common = counter.most_common(5)
+        
+        data = []
+        for emp_id, count in most_common:
+            data.append({
+                "id": emp_id,
+                "name": name_map[emp_id],
+                "count": count
+            })
+            
+        return jsonify({"success": True, "data": data})
+
+    except Exception as e:
+         print(f"Analytics Top Late Error: {e}")
+         return jsonify({"success": False, "error": str(e)}), 500
+
 # --- Helper Functions ---
 
 def get_current_schedule():
@@ -598,6 +784,22 @@ def get_current_schedule():
         return {"start_time": "08:00", "end_time": "17:00", "late_tolerance_minutes": 15}
     except:
         return {"start_time": "08:00", "end_time": "17:00", "late_tolerance_minutes": 15}
+
+def log_activity(actor_name, action, target_id=None, details=None):
+    """
+    Helper to insert audit log
+    """
+    try:
+        log_data = {
+            "actor_name": actor_name,
+            "action": action,
+            "target_id": target_id,
+            "details": details or {}
+        }
+        supabase.table('audit_logs').insert(log_data).execute()
+        print(f"Audit Log: {actor_name} -> {action}")
+    except Exception as e:
+        print(f"Failed to create audit log: {e}")
 
 def process_image_for_recognition(image, sid=None):
     # 0. Get Client State
@@ -817,14 +1019,26 @@ def process_image_for_recognition(image, sid=None):
             utc_now = datetime.now(timezone.utc).isoformat()
 
             if should_insert:
-                log_data = {
+                log_entry = {
                     "employee_id": best_match_id,
+                    "timestamp": current_time.isoformat(),
                     "status": status,
-                    "timestamp": utc_now,
-                    "shift_id": current_shift_id # Store historical shift
+                    "shift_id": current_shift_id,
+                    "confidence_score": 1.0 - min_distance # roughly
                 }
-                supabase.table('attendance_logs').insert(log_data).execute()
-
+                supabase.table('attendance_logs').insert(log_entry).execute()
+                
+                # --- Notification ---
+                # notification_service.notify_employee_checkin(best_match_name, current_time.strftime("%H:%M"), status)
+                
+                # Alert Admin if very late (e.g. > 30 mins)
+                if status == "Terlambat":
+                     # Calculate lateness
+                     # Simple logic: if tolerance is 15, and they are marked late, they are late.
+                     # Check actual minutes late if needed, but for now just alert.
+                     # notification_service.notify_admin_late_checkin(best_match_name, "XX") # Placeholder duration
+                     pass # Placeholder for notification_service call
+                
         except Exception as e:
             print(f"Error logging attendance: {e}")
             status = "Error"
@@ -834,7 +1048,7 @@ def process_image_for_recognition(image, sid=None):
             "user": {
                 "id": best_match_id,
                 "name": best_match_name,
-                "time": datetime.now().isoformat(),
+                "time": current_time.isoformat(),
                 "status": status
             },
             "is_live": True

@@ -15,6 +15,9 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { AttendanceTrendChart } from "@/components/charts/AttendanceTrendChart"
+import { DailyStatusChart } from "@/components/charts/DailyStatusChart"
+import { TopLateList } from "@/components/dashboard/TopLateList"
 
 export default function Dashboard() {
     const [stats, setStats] = useState({
@@ -147,9 +150,15 @@ export default function Dashboard() {
                 </Card>
             </div>
 
-            {/* Recent Activity Table */}
-            <div className="grid gap-4 md:grid-cols-7">
-                <Card className="col-span-7">
+            {/* Analytics Charts */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                <AttendanceTrendChart />
+                <DailyStatusChart />
+            </div>
+
+            {/* Recent Activity & Top Late */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                <Card className="col-span-4">
                     <CardHeader>
                         <CardTitle>Riwayat Presensi Terbaru</CardTitle>
                         <CardDescription>
@@ -215,6 +224,8 @@ export default function Dashboard() {
                         </Table>
                     </CardContent>
                 </Card>
+
+                <TopLateList />
             </div>
         </div>
     )
