@@ -782,10 +782,30 @@ def process_image_for_recognition(image, sid=None):
                     status = "Pulang"
                     should_insert = True
                 else:
-                    # UPDATED LOGIC: If checking out early, maybe "Pulang Cepat" or just allow it?
-                    # For now, let's allow it but mark as Pulang (or could implement early departure)
-                    status = "Pulang" # Simply allow checkout whenever they face scan again after checkin
-                    should_insert = True
+                    # Early Departure Logic
+                    # CHECK 1: Prevent "Pulang" if before Shift Start (e.g. scanned Masuk early, then scanned again)
+                    schedule_start_dt = schedule_start.replace(tzinfo=None)
+                    if current_time.replace(tzinfo=None) < schedule_start_dt:
+                        status = "Sudah Presensi Masuk"
+                        should_insert = False
+                    else:
+                        # CHECK 2: Prevent Accidental Double Scan (Minimum 10 mins shift duration)
+                        # Ensure we don't checkout immediately after checkin
+                        last_in_time_str = logs[0]['timestamp'] if logs else None
+                        
+                        can_checkout = True
+                        if last_in_time_str:
+                             last_in = datetime.fromisoformat(last_in_time_str.replace("Z", "+00:00"))
+                             # Compare using UTC
+                             if (datetime.now(timezone.utc) - last_in).total_seconds() < 600: # 10 minutes
+                                 can_checkout = False
+                        
+                        if can_checkout:
+                            status = "Pulang" # Allow early checkout if > 10 mins
+                            should_insert = True
+                        else:
+                            status = "Sudah Presensi Masuk (Barusan)"
+                            should_insert = False
 
             
             else:
