@@ -55,6 +55,11 @@ export function DashboardSidebar({ className }: SidebarProps) {
             icon: History,
         },
         {
+            title: "Divisi & Jabatan",
+            href: "/settings/departments",
+            icon: Users, // Using Users icon again or maybe Building if imported
+        },
+        {
             title: "Pengaturan",
             href: "/settings",
             icon: Settings,

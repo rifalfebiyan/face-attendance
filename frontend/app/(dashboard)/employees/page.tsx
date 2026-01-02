@@ -50,76 +50,101 @@ interface Employee {
 export default function EmployeesPage() {
     const [employees, setEmployees] = useState<Employee[]>([])
     const [shifts, setShifts] = useState<any[]>([])
+    // New States
+    const [departments, setDepartments] = useState<any[]>([])
+    const [positions, setPositions] = useState<any[]>([])
+
     const [isLoading, setIsLoading] = useState(true)
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null)
-    const [openShiftDialog, setOpenShiftDialog] = useState(false)
-    const [selectedShiftId, setSelectedShiftId] = useState<string>("")
+    const [openEditDialog, setOpenEditDialog] = useState(false) // Renamed from openShiftDialog
+
+    // Form States
+    const [formData, setFormData] = useState({
+        shift_id: "",
+        department_id: "",
+        position_id: ""
+    })
 
     // Fallback if env not set
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5001"
 
-    const fetchEmployees = async () => {
+    const fetchAllData = async () => {
         setIsLoading(true)
         try {
-            const res = await fetch(`${API_URL}/employees`, {
-                headers: { "ngrok-skip-browser-warning": "true" }
-            })
-            if (res.ok) {
-                const data = await res.json()
-                setEmployees(data.employees || [])
-            } else {
-                console.log("Endpoint /employees not found")
+            const headers = { "ngrok-skip-browser-warning": "true" }
+            const [empRes, shiftRes, deptRes, posRes] = await Promise.all([
+                fetch(`${API_URL}/employees`, { headers }),
+                fetch(`${API_URL}/shifts`, { headers }),
+                fetch(`${API_URL}/departments`, { headers }),
+                fetch(`${API_URL}/positions`, { headers })
+            ])
+
+            if (empRes.ok) {
+                const d = await empRes.json()
+                setEmployees(d.employees || [])
             }
+            if (shiftRes.ok) {
+                const d = await shiftRes.json()
+                setShifts(d.data || [])
+            }
+            if (deptRes.ok) {
+                const d = await deptRes.json()
+                setDepartments(d.data || [])
+            }
+            if (posRes.ok) {
+                const d = await posRes.json()
+                setPositions(d.data || [])
+            }
+
         } catch (error) {
-            console.error("Failed to fetch employees", error)
-            toast.error("Gagal memuat data karyawan")
+            console.error("Failed to fetch data", error)
+            toast.error("Gagal memuat data")
         } finally {
             setIsLoading(false)
         }
     }
 
-    const fetchShifts = async () => {
-        try {
-            const res = await fetch(`${API_URL}/shifts`, {
-                headers: { "ngrok-skip-browser-warning": "true" }
-            })
-            const data = await res.json()
-            if (data.success) setShifts(data.data)
-        } catch (e) { console.error(e) }
-    }
-
-    const handleAssignShift = async () => {
+    const handleUpdateEmployee = async () => {
         if (!selectedEmployee) return
         try {
-            const res = await fetch(`${API_URL}/employees/${selectedEmployee.id}/shift`, {
+            const res = await fetch(`${API_URL}/employees/${selectedEmployee.id}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    "ngrok-skip-browser-warning": "true"
+                },
                 body: JSON.stringify({
-                    shift_id: selectedShiftId,
+                    shift_id: formData.shift_id,
+                    department_id: formData.department_id,
+                    position_id: formData.position_id,
                     actor_name: localStorage.getItem("user_name") || "Admin"
                 })
             })
 
             if (res.ok) {
-                toast.success("Shift berhasil diupdate")
-                setOpenShiftDialog(false)
-                fetchEmployees()
+                toast.success("Data berhasil diupdate")
+                setOpenEditDialog(false)
+                fetchAllData()
             } else {
-                toast.error("Gagal update shift")
+                toast.error("Gagal update data")
             }
         } catch (e) {
-            toast.error("Error updating shift")
+            toast.error("Error updating data")
         }
     }
 
-    const openAssignShift = (emp: any) => {
+    const openEdit = (emp: any) => {
         setSelectedEmployee(emp)
-        // @ts-ignore
-        setSelectedShiftId(emp.shift_id ? String(emp.shift_id) : "")
-        setOpenShiftDialog(true)
+        setFormData({
+            shift_id: emp.shift_id ? String(emp.shift_id) : "",
+            department_id: emp.department_id ? String(emp.department_id) : "",
+            position_id: emp.position_id ? String(emp.position_id) : ""
+        })
+        setOpenEditDialog(true)
     }
 
     const handleDelete = async (id: string) => {
+        // ... (existing code)
         try {
             const actor = localStorage.getItem("user_name") || "Admin"
             const res = await fetch(`${API_URL}/employees/${id}?actor_name=${encodeURIComponent(actor)}`, {
@@ -129,7 +154,7 @@ export default function EmployeesPage() {
 
             if (res.ok) {
                 toast.success("Karyawan berhasil dihapus")
-                fetchEmployees() // Refresh list
+                fetchAllData()
             } else {
                 const err = await res.json()
                 toast.error(`Gagal menghapus: ${err.error || 'Unknown error'}`)
@@ -140,8 +165,7 @@ export default function EmployeesPage() {
     }
 
     useEffect(() => {
-        fetchEmployees()
-        fetchShifts()
+        fetchAllData()
     }, [])
 
     return (
@@ -150,11 +174,11 @@ export default function EmployeesPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Data Karyawan</h1>
                     <p className="text-muted-foreground">
-                        Kelola data karyawan yang terdaftar.
+                        Kelola data karyawan, shift, divisi, dan jabatan.
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" size="icon" onClick={fetchEmployees}>
+                    <Button variant="outline" size="icon" onClick={fetchAllData}>
                         <RefreshCcw className="h-4 w-4" />
                     </Button>
                     <Link href="/register">
@@ -174,10 +198,9 @@ export default function EmployeesPage() {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead className="w-[100px]">Avatar</TableHead>
+                                <TableHead className="w-[80px]">Avatar</TableHead>
                                 <TableHead>Nama Lengkap</TableHead>
-                                <TableHead>NIP / ID</TableHead>
-                                <TableHead>Status Wajah</TableHead>
+                                <TableHead>Divisi/Jabatan</TableHead>
                                 <TableHead>Shift</TableHead>
                                 <TableHead className="text-right">Aksi</TableHead>
                             </TableRow>
@@ -196,7 +219,7 @@ export default function EmployeesPage() {
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                employees.map((emp) => (
+                                employees.map((emp: any) => (
                                     <TableRow key={emp.id}>
                                         <TableCell>
                                             <Avatar>
@@ -204,70 +227,65 @@ export default function EmployeesPage() {
                                                 <AvatarFallback>{emp.name.substring(0, 2).toUpperCase()}</AvatarFallback>
                                             </Avatar>
                                         </TableCell>
-                                        <TableCell className="font-medium">{emp.name}</TableCell>
-                                        <TableCell>{emp.id}</TableCell>
                                         <TableCell>
-                                            {emp.face_encoding ? (
-                                                <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                                                    Terdaftar
-                                                </span>
+                                            <div className="font-medium">{emp.name}</div>
+                                            <div className="text-xs text-muted-foreground">{emp.id}</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            {emp.department_id ? (
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium">{emp.departments?.name}</span>
+                                                    <span className="text-xs text-muted-foreground">{emp.positions?.title || '-'}</span>
+                                                </div>
                                             ) : (
-                                                <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">
-                                                    Belum
-                                                </span>
+                                                <span className="text-muted-foreground text-xs font-italic">-</span>
                                             )}
                                         </TableCell>
                                         <TableCell>
                                             {emp.shift_id ? (
-                                                <div className="flex items-center gap-2">
-                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                                        {shifts.find(s => s.id === emp.shift_id)?.name || "Shift #" + emp.shift_id}
-                                                    </Badge>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-6 w-6"
-                                                        onClick={() => openAssignShift(emp)}
-                                                    >
-                                                        <Settings className="h-3 w-3" />
-                                                    </Button>
-                                                </div>
+                                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                                    {shifts.find(s => s.id === emp.shift_id)?.name || "Shift #" + emp.shift_id}
+                                                </Badge>
                                             ) : (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => openAssignShift(emp)}
-                                                    className="h-7 text-xs"
-                                                >
-                                                    Set Shift
-                                                </Button>
+                                                <span className="text-xs text-red-400">No Shift</span>
                                             )}
                                         </TableCell>
                                         <TableCell className="text-right">
-                                            <AlertDialog>
-                                                <AlertDialogTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700 hover:bg-red-50">
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </AlertDialogTrigger>
-                                                <AlertDialogContent>
-                                                    <AlertDialogHeader>
-                                                        <AlertDialogTitle>Apakah Anda yakin?</AlertDialogTitle>
-                                                        <AlertDialogDescription>
-                                                            Tindakan ini tidak dapat dibatalkan. Data karyawan <strong>{emp.name}</strong> beserta riwayat wajah akan dihapus permanen.
-                                                        </AlertDialogDescription>
-                                                    </AlertDialogHeader>
-                                                    <AlertDialogFooter>
-                                                        <AlertDialogCancel>Batal</AlertDialogCancel>
-                                                        <AlertDialogAction
-                                                            onClick={() => handleDelete(emp.id)}
-                                                            className="bg-red-600 hover:bg-red-700 text-white"
-                                                        >
-                                                            Hapus
-                                                        </AlertDialogAction>
-                                                    </AlertDialogFooter>
-                                                </AlertDialogContent>
-                                            </AlertDialog>
+                                            <div className="flex justify-end gap-2">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => openEdit(emp)}
+                                                    className="h-8 w-8 p-0"
+                                                >
+                                                    <Settings className="h-4 w-4" />
+                                                </Button>
+
+                                                <AlertDialog>
+                                                    <AlertDialogTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50">
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </AlertDialogTrigger>
+                                                    <AlertDialogContent>
+                                                        <AlertDialogHeader>
+                                                            <AlertDialogTitle>Hapus Karyawan?</AlertDialogTitle>
+                                                            <AlertDialogDescription>
+                                                                Data <strong>{emp.name}</strong> akan dihapus permanen.
+                                                            </AlertDialogDescription>
+                                                        </AlertDialogHeader>
+                                                        <AlertDialogFooter>
+                                                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                                                            <AlertDialogAction
+                                                                onClick={() => handleDelete(emp.id)}
+                                                                className="bg-red-600 hover:bg-red-700 text-white"
+                                                            >
+                                                                Hapus
+                                                            </AlertDialogAction>
+                                                        </AlertDialogFooter>
+                                                    </AlertDialogContent>
+                                                </AlertDialog>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))
@@ -276,28 +294,64 @@ export default function EmployeesPage() {
                     </Table>
                 </CardContent>
             </Card>
-            <Dialog open={openShiftDialog} onOpenChange={setOpenShiftDialog}>
+
+            <Dialog open={openEditDialog} onOpenChange={setOpenEditDialog}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Atur Shift Kerja</DialogTitle>
+                        <DialogTitle>Edit Data Karyawan</DialogTitle>
                         <DialogDescription>
-                            Pilih shift untuk karyawan <strong>{selectedEmployee?.name}</strong>.
+                            Atur Shift, Divisi, dan Jabatan untuk <strong>{selectedEmployee?.name}</strong>.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
-                        <select
-                            className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            value={selectedShiftId}
-                            onChange={(e) => setSelectedShiftId(e.target.value)}
-                        >
-                            <option value="">-- Pilih Shift --</option>
-                            {shifts.map(s => (
-                                <option key={s.id} value={s.id}>{s.name} ({s.start_time} - {s.end_time})</option>
-                            ))}
-                        </select>
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">Shift Kerja</label>
+                            <select
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={formData.shift_id}
+                                onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
+                            >
+                                <option value="">-- Pilih Shift --</option>
+                                {shifts.map(s => (
+                                    <option key={s.id} value={s.id}>{s.name} ({s.start_time} - {s.end_time})</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">Divisi (Departemen)</label>
+                            <select
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={formData.department_id}
+                                onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                            >
+                                <option value="">-- Pilih Divisi --</option>
+                                {departments.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <label className="text-sm font-medium">Jabatan</label>
+                            <select
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                value={formData.position_id}
+                                onChange={(e) => setFormData({ ...formData, position_id: e.target.value })}
+                            >
+                                <option value="">-- Pilih Jabatan --</option>
+                                {/* Filter positions based on selected department? Optional but good UX */}
+                                {positions
+                                    .filter(p => !formData.department_id || String(p.department_id) === formData.department_id)
+                                    .map(p => (
+                                        <option key={p.id} value={p.id}>{p.title}</option>
+                                    ))}
+                            </select>
+                        </div>
+
                     </div>
                     <DialogFooter>
-                        <Button onClick={handleAssignShift}>Simpan</Button>
+                        <Button onClick={handleUpdateEmployee}>Simpan Perubahan</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

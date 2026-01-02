@@ -10,7 +10,6 @@ import json
 import base64
 import cv2
 from datetime import datetime, date, timedelta, timezone
-import mediapipe as mp
 from scipy.spatial import distance as dist
 import pandas as pd
 import io
@@ -18,6 +17,18 @@ from collections import Counter
 from dateutil.relativedelta import relativedelta
 from werkzeug.utils import secure_filename
 from notifications import notification_service # Import Service
+import requests
+import time
+from threading import Thread
+
+# Try importing mediapipe (might fail on Python 3.13 or Apple Silicon)
+try:
+    import mediapipe as mp
+    mp_face_mesh = mp.solutions.face_mesh
+    HAS_MEDIAPIPE = True
+except ImportError:
+    print("Warning: mediapipe not found. Liveness detection will be disabled.")
+    HAS_MEDIAPIPE = False
 
 from dotenv import load_dotenv
 
@@ -234,6 +245,10 @@ def register():
             "phone_number": phone, # Cache phone
             "encodings": new_encodings
         }
+        
+        # --- Notification: Registration Success ---
+        if phone:
+            notification_service.notify_registration_success(name, phone)
 
         return jsonify({"success": True, "userId": user_id, "message": "User registered successfully"})
 
@@ -371,32 +386,72 @@ def get_reports():
 @app.route('/employees', methods=['GET'])
 def get_employees():
     try:
-        response = supabase.table('employees').select("*").execute()
+        # Join with shifts, departments, and positions
+        # Simplify for now to debug: just shifts
+        # Note: If relations 'departments' or 'positions' don't exist in Supabase yet (foreign keys), this will crash.
+        # Fallback to simple select if joins fail.
+        try:
+             response = supabase.table('employees').select("*, shifts(*), departments(name), positions(title)").order('name').execute()
+        except:
+             print("Join query failed, falling back to simple select")
+             response = supabase.table('employees').select("*, shifts(*)").order('name').execute()
         return jsonify({"employees": response.data})
     except Exception as e:
         print(f"Error fetching employees: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/employees/<id>/shift', methods=['PUT'])
-def update_employee_shift(id):
+@app.route('/employees/<id>', methods=['PUT'])
+def update_employee(id):
     try:
         data = request.json
-        shift_id = data.get("shift_id")
+        updates = {}
         
-        # Convert to int or None
-        if shift_id and str(shift_id).lower() != "none" and shift_id != "":
-             shift_id = int(shift_id)
-        else:
-             shift_id = None
-             
-        supabase.table('employees').update({"shift_id": shift_id}).eq('id', id).execute()
+        # Helper to treat "none"/"null"/"" as None
+        def get_val(key):
+            val = data.get(key)
+            if val and str(val).lower() not in ["none", "null", ""]:
+                return int(val) if str(val).isdigit() else val
+            return None
+
+        if 'shift_id' in data: updates['shift_id'] = get_val('shift_id')
+        if 'department_id' in data: updates['department_id'] = get_val('department_id')
+        if 'position_id' in data: updates['position_id'] = get_val('position_id')
+        if 'leave_quota' in data: updates['leave_quota'] = get_val('leave_quota')
         
+        if not updates:
+             return jsonify({"success": True, "message": "No changes"})
+
+        supabase.table('employees').update(updates).eq('id', id).execute()
+        
+        # --- Notification: Shift Change ---
+        if 'shift_id' in updates:
+            try:
+                # 1. Get Employee Details (Phone number)
+                emp_res = supabase.table('employees').select('name, phone_number').eq('id', id).single().execute()
+                emp_data = emp_res.data
+                
+                # 2. Get New Shift Details
+                shift_res = supabase.table('shifts').select('name, start_time, end_time').eq('id', updates['shift_id']).single().execute()
+                shift_data = shift_res.data
+                
+                if emp_data and shift_data:
+                    notification_service.notify_shift_change(
+                        emp_data['name'], 
+                        shift_data['name'], 
+                        shift_data['start_time'], 
+                        shift_data['end_time'],
+                        emp_data.get('phone_number')
+                    )
+            except Exception as e:
+                print(f"Failed to send shift notification: {e}")
+
         # --- Audit Log ---
         actor_name = data.get('actor_name', 'Admin')
-        log_activity(actor_name, "UPDATE_SHIFT", target_id=id, details={"new_shift_id": shift_id})
+        log_activity(actor_name, "UPDATE_EMPLOYEE", target_id=id, details=updates)
         
         return jsonify({"success": True})
     except Exception as e:
+        print(f"Update Error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/employees/<id>', methods=['DELETE'])
@@ -503,14 +558,24 @@ def delete_shift(id):
 def handle_leaves():
     if request.method == 'GET':
         try:
-            # Join with employees to get names
-            res = supabase.table('leaves').select("*, employees(name)").order('created_at', desc=True).execute()
+            # 1. Fetch Leaves
+            res = supabase.table('leaves').select("*").order('created_at', desc=True).execute()
+            leaves_data = res.data
             
-            # Flatten structure for frontend
+            # 2. Extract Employee IDs
+            emp_ids = list(set([l['employee_id'] for l in leaves_data if l.get('employee_id')]))
+            
+            # 3. Fetch Employee Names
+            emp_map = {}
+            if emp_ids:
+                # Use 'in' filter for batch fetch
+                emp_res = supabase.table('employees').select('id, name').in_('id', emp_ids).execute()
+                emp_map = {e['id']: e['name'] for e in emp_res.data}
+            
+            # 4. Merge Data
             leaves = []
-            for l in res.data:
-                l['employee_name'] = l['employees']['name'] if l.get('employees') else 'Unknown'
-                del l['employees']
+            for l in leaves_data:
+                l['employee_name'] = emp_map.get(l.get('employee_id'), 'Unknown')
                 leaves.append(l)
                 
             return jsonify({"success": True, "data": leaves})
@@ -658,6 +723,81 @@ def export_reports():
             
     except Exception as e:
         print(f"Export Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# --- NEW: Management Endpoints ---
+
+@app.route('/departments', methods=['GET', 'POST'])
+def handle_departments():
+    try:
+        if request.method == 'GET':
+            res = supabase.table('departments').select('*').order('name').execute()
+            return jsonify({"success": True, "data": res.data})
+        
+        elif request.method == 'POST':
+            name = request.json.get('name')
+            if not name:
+                return jsonify({"success": False, "error": "Name required"}), 400
+            
+            res = supabase.table('departments').insert({"name": name}).execute()
+            return jsonify({"success": True, "data": res.data})
+            
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/departments/<id>', methods=['DELETE'])
+def delete_department(id):
+    try:
+        supabase.table('departments').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/positions', methods=['GET', 'POST'])
+def handle_positions():
+    try:
+        if request.method == 'GET':
+            # Join with departments to get name (supabase-py select syntax: *, departments(name))
+            res = supabase.table('positions').select('*, departments(name)').order('title').execute()
+            return jsonify({"success": True, "data": res.data})
+        
+        elif request.method == 'POST':
+            data = request.json
+            res = supabase.table('positions').insert(data).execute()
+            return jsonify({"success": True, "data": res.data})
+            
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/positions/<id>', methods=['DELETE'])
+def delete_position(id):
+    try:
+        supabase.table('positions').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/holidays', methods=['GET', 'POST'])
+def handle_holidays():
+    try:
+        if request.method == 'GET':
+            res = supabase.table('holidays').select('*').order('date').execute()
+            return jsonify({"success": True, "data": res.data})
+            
+        elif request.method == 'POST':
+            data = request.json
+            res = supabase.table('holidays').insert(data).execute()
+            return jsonify({"success": True, "data": res.data})
+            
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/holidays/<id>', methods=['DELETE'])
+def delete_holiday(id):
+    try:
+        supabase.table('holidays').delete().eq('id', id).execute()
+        return jsonify({"success": True})
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 # --- NEW: Analytics Endpoints ---
@@ -1100,7 +1240,13 @@ def process_image_for_recognition(image, sid=None):
                 supabase.table('attendance_logs').insert(log_entry).execute()
                 
                 # --- Notification ---
-                # notification_service.notify_employee_checkin(best_match_name, current_time.strftime("%H:%M"), status)
+                phone_number = known_faces_cache.get(best_match_id, {}).get('phone_number')
+                print(f"[DEBUG] Notification: User={best_match_name}, Phone={phone_number}")
+                
+                if phone_number:
+                    notification_service.notify_employee_checkin(best_match_name, current_time.strftime("%H:%M"), status, phone_number)
+                else:
+                    print(f"[DEBUG] No phone number for {best_match_name}, skipping notification.")
                 
                 # Alert Admin if very late (e.g. > 30 mins)
                 if status == "Terlambat":
