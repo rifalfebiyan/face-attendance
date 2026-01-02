@@ -22,6 +22,9 @@ const formSchema = z.object({
     id: z.string().min(3, {
         message: "ID/NIP must be at least 3 characters.",
     }),
+    phone: z.string().min(10, {
+        message: "Nomor HP minimal 10 digit",
+    }),
 })
 
 export default function RegisterPage() {
@@ -39,6 +42,7 @@ export default function RegisterPage() {
         defaultValues: {
             name: "",
             id: "",
+            phone: "",
         },
     })
 
@@ -92,6 +96,7 @@ export default function RegisterPage() {
             const formData = new FormData()
             formData.append("name", form.getValues("name"))
             formData.append("id", form.getValues("id"))
+            formData.append("phone", form.getValues("phone"))
 
             capturedImages.forEach((file, index) => {
                 formData.append(`photo${index}`, file)
@@ -160,6 +165,19 @@ export default function RegisterPage() {
                                                 <Label>NIP / ID Karyawan</Label>
                                                 <FormControl>
                                                     <Input placeholder="12345678" {...field} />
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+                                    <FormField
+                                        control={form.control}
+                                        name="phone"
+                                        render={({ field }) => (
+                                            <FormItem>
+                                                <Label>Nomor WhatsApp (Contoh: 628123456789)</Label>
+                                                <FormControl>
+                                                    <Input placeholder="62812..." type="tel" {...field} />
                                                 </FormControl>
                                                 <FormMessage />
                                             </FormItem>

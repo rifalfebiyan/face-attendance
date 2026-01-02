@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+
+# WhatsApp Web Session & Cache
+.wwebjs_auth/
+.wwebjs_cache/
+
+# System
+.DS_Store

@@ -105,10 +105,13 @@ def load_data_from_supabase():
             # Supabase stores JSON, so we get a list of lists (encodings) directly
             # We need to convert them back to numpy arrays for face_recognition
             raw_encodings = emp['face_encoding'] 
+            phone_number = emp.get('phone_number') # Get phone number
+
             if raw_encodings:
                 encodings = [np.array(e) for e in raw_encodings]
                 known_faces_cache[user_id] = {
                     "name": name,
+                    "phone_number": phone_number,
                     "encodings": encodings
                 }
                 count += 1
@@ -190,6 +193,7 @@ def register():
     try:
         name = request.form.get('name')
         user_id = request.form.get('id')
+        phone = request.form.get('phone') # Get phone
         
         if not name or not user_id:
             return jsonify({"success": False, "error": "Name and ID required"}), 400
@@ -219,6 +223,7 @@ def register():
         data = {
             "id": user_id,
             "name": name,
+            "phone_number": phone, # Save phone
             "face_encoding": encodings_list
         }
         supabase.table('employees').upsert(data).execute()
@@ -226,6 +231,7 @@ def register():
         # 2. Update Local Cache
         known_faces_cache[user_id] = {
             "name": name,
+            "phone_number": phone, # Cache phone
             "encodings": new_encodings
         }
 

@@ -1,36 +1,47 @@
+import requests
+import json
 from datetime import datetime
 
 class NotificationService:
     def __init__(self):
-        # In a real app, initialize Twilio Client / SendGrid / WhatsApp API
-        print("NotificationService initialized.")
+        # Gateway URL (Node.js service)
+        self.gateway_url = "http://localhost:3000/send"
+        print("✅ NotificationService ready (Targeting WhatsApp Gateway)")
 
-    def notify_employee_checkin(self, employee_name, time_str, status):
-        """
-        Sends a message to the employee (e.g., via WhatsApp).
-        """
-        message = f"Hello {employee_name}, successful check-in at {time_str}. Status: {status}."
-        # Mock sending
-        self._log_notification("WhatsApp", employee_name, message)
+    def _send_whatsapp(self, number, message):
+        try:
+            payload = {
+                "number": number,
+                "message": message
+            }
+            # Timeout is short to avoid blocking main thread too long
+            requests.post(self.gateway_url, json=payload, timeout=2)
+            print(f"✅ WA Sent to {number}")
+        except Exception as e:
+            print(f"⚠️ Failed to send WA (Gateway might be down): {e}")
+
+    def notify_employee_checkin(self, employee_name, time_str, status, number):
+        # Format: 628xxx (Indonesia)
+        if not number:
+             return
+             
+        # Clean number (ensure no + or spaces if using wa gateway, but gateway handles +)
+        target_number = number
+        
+        msg = f"*Check-in Berhasil* ✅\n\nNama: {employee_name}\nJam: {time_str}\nStatus: {status}\n\n_Sent by FaceAttendance AI_"
+        self._send_whatsapp(target_number, msg)
 
     def notify_admin_leave_request(self, employee_name, leave_type, dates):
-        """
-        Notifies admin about a new leave request.
-        """
-        message = f"New Leave Request from {employee_name} ({leave_type}) for {dates}. Please review."
-        # Mock sending
-        self._log_notification("Email/Admin-Bot", "HR Admin", message)
+        target_number = "628212345678" # Admin's Number
+        
+        msg = f"📩 *Pengajuan Cuti Baru*\n\nNama: {employee_name}\nJenis: {leave_type}\nTanggal: {dates}\n\nMohon review di dashboard."
+        self._send_whatsapp(target_number, msg)
     
     def notify_admin_late_checkin(self, employee_name, minutes_late):
-        """
-        Notifies admin if someone is very late.
-        """
-        message = f"Alert: {employee_name} is late by {minutes_late} minutes."
-        self._log_notification("Slack/Admin-Bot", "HR Admin", message)
-
-    def _log_notification(self, channel, recipient, body):
-        # This simulates the external API call
-        print(f"\n[🔔 NOTIFICATION] Channel: {channel} | To: {recipient} | Body: {body}\n")
+        target_number = "628212345678" # Admin's Number
+        
+        msg = f"⚠️ *Terlambat Check-in*\n\nNama: {employee_name}\nTerlambat: {minutes_late} Menit\n\nMohon diperhatikan."
+        self._send_whatsapp(target_number, msg)
 
 # Global Instance
 notification_service = NotificationService()
