@@ -111,9 +111,10 @@ export default function AuditLogsPage() {
                                         <TableCell className="font-medium">{log.actor_name}</TableCell>
                                         <TableCell>
                                             <Badge variant="outline" className={
-                                                log.action.includes('DELETE') ? 'border-red-500 text-red-600' :
-                                                    log.action === 'UPDATE_SHIFT' ? 'border-orange-500 text-orange-600' :
-                                                        log.action === 'MANUAL_ATTENDANCE' ? 'border-blue-500 text-blue-600' : ''
+                                                log.action.includes('DELETE') || log.action.includes('REJECT') ? 'border-red-500 text-red-600' :
+                                                    log.action.includes('APPROVE') ? 'border-green-500 text-green-600' :
+                                                        log.action === 'UPDATE_SHIFT' ? 'border-orange-500 text-orange-600' :
+                                                            log.action === 'MANUAL_ATTENDANCE' ? 'border-blue-500 text-blue-600' : ''
                                             }>
                                                 {log.action}
                                             </Badge>

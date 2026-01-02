@@ -59,6 +59,10 @@ export default function LoginPage() {
             }
 
             toast.success("Login successful")
+            // Store user name for audit logs
+            if (data.user && data.user.name) {
+                localStorage.setItem("user_name", data.user.name)
+            }
             router.push("/")
             router.refresh()
         } catch (error) {

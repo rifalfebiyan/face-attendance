@@ -90,7 +90,8 @@ export default function ShiftsPage() {
     const handleDelete = async (id: number) => {
         if (!confirm("Hapus shift ini?")) return
         try {
-            const res = await fetch(`${API_URL}/shifts/${id}`, {
+            const actor = localStorage.getItem("user_name") || "Admin"
+            const res = await fetch(`${API_URL}/shifts/${id}?actor_name=${encodeURIComponent(actor)}`, {
                 method: "DELETE"
             })
             if (res.ok) {

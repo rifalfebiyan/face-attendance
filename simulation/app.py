@@ -375,14 +375,19 @@ def get_employees():
 def update_employee_shift(id):
     try:
         data = request.json
-        shift_id = data.get('shift_id')
-        # Convert empty string to None
-        value = int(shift_id) if shift_id else None
+        shift_id = data.get("shift_id")
         
-        supabase.table('employees').update({"shift_id": value}).eq('id', id).execute()
+        # Convert to int or None
+        if shift_id and str(shift_id).lower() != "none" and shift_id != "":
+             shift_id = int(shift_id)
+        else:
+             shift_id = None
+             
+        supabase.table('employees').update({"shift_id": shift_id}).eq('id', id).execute()
         
         # --- Audit Log ---
-        log_activity("Admin", "UPDATE_SHIFT", target_id=id, details={"new_shift_id": value})
+        actor_name = data.get('actor_name', 'Admin')
+        log_activity(actor_name, "UPDATE_SHIFT", target_id=id, details={"new_shift_id": shift_id})
         
         return jsonify({"success": True})
     except Exception as e:
@@ -404,7 +409,8 @@ def delete_employee(id):
             print(f"Removed user {id} from cache.")
 
         # --- Audit Log ---
-        log_activity("Admin", "DELETE_EMPLOYEE", target_id=id, details={})
+        actor_name = request.args.get('actor_name', 'Admin')
+        log_activity(actor_name, "DELETE_EMPLOYEE", target_id=id, details={})
 
         return jsonify({"success": True, "message": f"User {id} deleted successfully"})
     except Exception as e:
@@ -476,8 +482,11 @@ def delete_shift(id):
     try:
         supabase.table('shifts').delete().eq('id', id).execute()
         
+        supabase.table('shifts').delete().eq('id', id).execute()
+        
         # --- Audit Log ---
-        log_activity("Admin", "DELETE_SHIFT", target_id=id, details={})
+        actor_name = request.args.get('actor_name', 'Admin')
+        log_activity(actor_name, "DELETE_SHIFT", target_id=id, details={})
 
         return jsonify({"success": True})
     except Exception as e:
@@ -531,14 +540,25 @@ def update_leave(id):
         if request.method == 'DELETE':
              supabase.table('leaves').delete().eq('id', id).execute()
              
+             supabase.table('leaves').delete().eq('id', id).execute()
+             
              # --- Audit Log ---
-             log_activity("Admin", "DELETE_LEAVE", target_id=id, details={})
+             actor_name = request.args.get('actor_name', 'Admin')
+             log_activity(actor_name, "DELETE_LEAVE", target_id=id, details={})
 
              return jsonify({"success": True})
         
         # PUT (Update Status)
         data = request.json
-        supabase.table('leaves').update({"status": data.get("status")}).eq('id', id).execute()
+        new_status = data.get("status")
+        supabase.table('leaves').update({"status": new_status}).eq('id', id).execute()
+        
+        # --- Audit Log ---
+        # Action name: APPROVE_LEAVE or REJECT_LEAVE
+        action_name = f"{new_status.upper()}_LEAVE" if new_status else "UPDATE_LEAVE"
+        actor_name = data.get('actor_name', 'Admin')
+        log_activity(actor_name, action_name, target_id=id, details={"status": new_status})
+        
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -566,8 +586,21 @@ def manual_attendance():
         }
         supabase.table('attendance_logs').insert(log).execute()
         
+        shift_id = emp_res.data[0]['shift_id'] if emp_res.data else None
+
+        # 2. Insert log with shift_id
+        log = {
+            "employee_id": employee_id,
+            "timestamp": timestamp,
+            "status": status,
+            "shift_id": shift_id, # Store historical shift
+            "confidence_score": 1.0
+        }
+        supabase.table('attendance_logs').insert(log).execute()
+        
         # --- Audit Log ---
-        log_activity("Admin", "MANUAL_ATTENDANCE", target_id=employee_id, details={"status": status, "shift_id": shift_id})
+        actor_name = data.get('actor_name', 'Admin')
+        log_activity(actor_name, "MANUAL_ATTENDANCE", target_id=employee_id, details={"status": status, "shift_id": shift_id})
 
         return jsonify({"success": True})
     except Exception as e:

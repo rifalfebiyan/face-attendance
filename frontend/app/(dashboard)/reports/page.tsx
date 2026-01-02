@@ -98,7 +98,8 @@ export default function ReportsPage() {
                 body: JSON.stringify({
                     employee_id: manualData.employee_id,
                     timestamp: new Date(manualData.timestamp).toISOString(),
-                    status: manualData.status
+                    status: manualData.status,
+                    actor_name: localStorage.getItem("user_name") || "Admin"
                 })
             })
 

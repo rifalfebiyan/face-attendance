@@ -94,7 +94,10 @@ export default function EmployeesPage() {
             const res = await fetch(`${API_URL}/employees/${selectedEmployee.id}/shift`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ shift_id: selectedShiftId })
+                body: JSON.stringify({
+                    shift_id: selectedShiftId,
+                    actor_name: localStorage.getItem("user_name") || "Admin"
+                })
             })
 
             if (res.ok) {
@@ -118,7 +121,8 @@ export default function EmployeesPage() {
 
     const handleDelete = async (id: string) => {
         try {
-            const res = await fetch(`${API_URL}/employees/${id}`, {
+            const actor = localStorage.getItem("user_name") || "Admin"
+            const res = await fetch(`${API_URL}/employees/${id}?actor_name=${encodeURIComponent(actor)}`, {
                 method: "DELETE",
                 headers: { "ngrok-skip-browser-warning": "true" }
             })

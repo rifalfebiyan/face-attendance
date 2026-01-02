@@ -119,7 +119,10 @@ export default function LeavesPage() {
                     "Content-Type": "application/json",
                     "ngrok-skip-browser-warning": "true"
                 },
-                body: JSON.stringify({ status })
+                body: JSON.stringify({
+                    status,
+                    actor_name: localStorage.getItem("user_name") || "Admin"
+                })
             })
             if (res.ok) {
                 toast.success(`Status diubah menjadi: ${status}`)
