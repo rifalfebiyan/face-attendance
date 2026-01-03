@@ -1,5 +1,5 @@
 import { SidebarWrapper } from "@/components/SidebarWrapper"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Menu } from "lucide-react"
 import { DashboardSidebar } from "@/components/DashboardSidebar"
@@ -22,6 +22,7 @@ export default function DashboardLayout({
                             </Button>
                         </SheetTrigger>
                         <SheetContent side="left" className="flex flex-col p-0 w-[280px]">
+                            <SheetTitle className="sr-only">Mobile Navigation</SheetTitle>
                             <DashboardSidebar className="border-none" />
                         </SheetContent>
                     </Sheet>
