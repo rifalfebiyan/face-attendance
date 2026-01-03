@@ -14,8 +14,8 @@ class NotificationService:
                 "number": number,
                 "message": message
             }
-            # Timeout is short to avoid blocking main thread too long
-            requests.post(self.gateway_url, json=payload, timeout=2)
+            # Timeout increased to handle getNumberId latency
+            requests.post(self.gateway_url, json=payload, timeout=10)
             print(f"✅ WA Sent to {number}")
         except Exception as e:
             print(f"⚠️ Failed to send WA (Gateway might be down): {e}")
@@ -28,7 +28,7 @@ class NotificationService:
         # Clean number (ensure no + or spaces if using wa gateway, but gateway handles +)
         target_number = number
         
-        msg = f"*Check-in Berhasil* ✅\n\nNama: {employee_name}\nJam: {time_str}\nStatus: {status}\n\n_Sent by FaceAttendance AI_"
+        msg = f"*Check-in Berhasil* ✅\n\nNama: {employee_name}\nJam: {time_str}\nStatus: {status}\n\n_Sent by WarunkDigital AI_"
         self._send_whatsapp(target_number, msg)
 
     def notify_admin_leave_request(self, employee_name, leave_type, dates):

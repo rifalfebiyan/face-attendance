@@ -40,6 +40,7 @@ client.initialize();
 // API Endpoint to send message
 app.post('/send', async (req, res) => {
     const { number, message } = req.body;
+    console.log(`[REQUEST] /send called for ${number}`);
 
     if (!isReady) {
         return res.status(503).json({ success: false, error: "WhatsApp client not ready yet" });
@@ -54,7 +55,15 @@ app.post('/send', async (req, res) => {
         // Remove '+' if exists
         let cleanNumber = number.toString().replace('+', '');
         // Ensure it ends with suffix
-        const chatId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
+        const tempChatId = cleanNumber.includes('@c.us') ? cleanNumber : `${cleanNumber}@c.us`;
+
+        const contact = await client.getNumberId(tempChatId);
+
+        if (!contact) {
+            return res.status(404).json({ success: false, error: "Contact not found on WhatsApp" });
+        }
+
+        const chatId = contact._serialized;
 
         await client.sendMessage(chatId, message);
         console.log(`Sent to ${cleanNumber}`);
