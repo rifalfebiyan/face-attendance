@@ -28,7 +28,7 @@ export default function DashboardLayout({
                     </Sheet>
                     <div className="font-semibold text-lg tracking-tight">Warunk Digital</div>
                 </header>
-                <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
+                <main className="flex-1 p-4 lg:p-6 overflow-y-auto w-full max-w-[100vw] overflow-x-hidden">
                     {children}
                 </main>
             </div>
